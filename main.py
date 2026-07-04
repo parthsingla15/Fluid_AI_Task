@@ -20,7 +20,9 @@ import os
 import uuid
 import logging
 
+
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -37,6 +39,12 @@ app = FastAPI(
     description="Plans, executes, self-checks, and produces a Word document from a natural-language request.",
     version="1.0.0",
 )
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+app.mount("/ui", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
+
+@app.get("/")
+def root():
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 
 class AgentRequest(BaseModel):
