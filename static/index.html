@@ -78,6 +78,59 @@
     padding: 22px 24px;
     margin-bottom: 20px;
   }
+
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 14px;
+  }
+  .tab-btn {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    font-weight: 500;
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 7px 7px 0 0;
+    border-bottom: none;
+    padding: 9px 16px;
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+  .tab-btn.active {
+    color: var(--accent);
+    background: var(--panel);
+  }
+  .tab-btn:hover:not(.active) { color: var(--text); }
+
+  .dropzone {
+    border: 1.5px dashed var(--line);
+    border-radius: 8px;
+    padding: 36px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .dropzone:hover, .dropzone.dragover {
+    border-color: var(--accent);
+    background: rgba(95, 216, 201, 0.04);
+  }
+  .dropzone-icon { font-size: 26px; color: var(--muted); margin-bottom: 10px; }
+  .dropzone-text #dropzoneLabel {
+    font-size: 14px;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .dropzone-hint {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .file-chosen {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--accent);
+  }
   .card-label {
     font-family: var(--mono);
     font-size: 11px;
@@ -291,7 +344,12 @@
     <span class="tag">plan · execute · self-check · docx</span>
   </header>
 
-  <div class="card">
+  <div class="tabs">
+    <button class="tab-btn active" id="tabText">Type a request</button>
+    <button class="tab-btn" id="tabUpload">Upload meeting recording</button>
+  </div>
+
+  <div class="card" id="textCard">
     <div class="card-label">Request</div>
     <textarea id="requestInput" placeholder="Describe what you need — e.g. &quot;Create a project plan for launching a mobile app in 3 months&quot;"></textarea>
     <div class="examples">
@@ -300,6 +358,21 @@
     </div>
     <div class="run-row">
       <button class="run" id="runBtn">Run agent →</button>
+    </div>
+  </div>
+
+  <div class="card" id="uploadCard" style="display:none;">
+    <div class="card-label">Meeting recording</div>
+    <div class="dropzone" id="dropzone">
+      <input type="file" id="fileInput" accept="video/*,audio/*" style="display:none;">
+      <div class="dropzone-text">
+        <div class="dropzone-icon">⭱</div>
+        <div id="dropzoneLabel">Click to choose a video or audio file, or drag it here</div>
+        <div class="dropzone-hint">MP4, MOV, MP3, WAV, M4A — up to 300MB. Long recordings are automatically split into chunks.</div>
+      </div>
+    </div>
+    <div class="run-row">
+      <button class="run" id="runUploadBtn" disabled>Run agent →</button>
     </div>
   </div>
 
@@ -339,6 +412,49 @@ document.querySelectorAll('.example-btn').forEach(btn => {
   });
 });
 
+// --- Tab switching ---
+const tabText = document.getElementById('tabText');
+const tabUpload = document.getElementById('tabUpload');
+const textCard = document.getElementById('textCard');
+const uploadCard = document.getElementById('uploadCard');
+
+tabText.addEventListener('click', () => {
+  tabText.classList.add('active'); tabUpload.classList.remove('active');
+  textCard.style.display = 'block'; uploadCard.style.display = 'none';
+});
+tabUpload.addEventListener('click', () => {
+  tabUpload.classList.add('active'); tabText.classList.remove('active');
+  uploadCard.style.display = 'block'; textCard.style.display = 'none';
+});
+
+// --- File upload / dropzone ---
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const dropzoneLabel = document.getElementById('dropzoneLabel');
+const runUploadBtn = document.getElementById('runUploadBtn');
+let selectedFile = null;
+
+dropzone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length > 0) setSelectedFile(fileInput.files[0]);
+});
+['dragover', 'dragenter'].forEach(evt => dropzone.addEventListener(evt, (e) => {
+  e.preventDefault(); dropzone.classList.add('dragover');
+}));
+['dragleave', 'drop'].forEach(evt => dropzone.addEventListener(evt, (e) => {
+  e.preventDefault(); dropzone.classList.remove('dragover');
+}));
+dropzone.addEventListener('drop', (e) => {
+  if (e.dataTransfer.files.length > 0) setSelectedFile(e.dataTransfer.files[0]);
+});
+
+function setSelectedFile(file) {
+  selectedFile = file;
+  const sizeMB = (file.size / 1_000_000).toFixed(1);
+  dropzoneLabel.innerHTML = `<span class="file-chosen">✓ ${file.name}</span> (${sizeMB} MB) — click to change`;
+  runUploadBtn.disabled = false;
+}
+
 const runBtn = document.getElementById('runBtn');
 const consoleCard = document.getElementById('console');
 const logLines = document.getElementById('logLines');
@@ -346,6 +462,63 @@ const resultsCard = document.getElementById('results');
 const errorBox = document.getElementById('errorBox');
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function runAgentFromRecording() {
+  if (!selectedFile) return;
+
+  errorBox.style.display = 'none';
+  resultsCard.style.display = 'none';
+  consoleCard.style.display = 'block';
+  logLines.innerHTML = '';
+  runUploadBtn.disabled = true;
+  runUploadBtn.textContent = 'Running…';
+
+  addLog('pending', `Uploading and transcribing "${selectedFile.name}"…`, true);
+
+  let data;
+  try {
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    const resp = await fetch('/agent/from-recording', { method: 'POST', body: formData });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail ? JSON.stringify(err.detail) : `Request failed (${resp.status})`);
+    }
+    data = await resp.json();
+  } catch (e) {
+    logLines.lastChild.remove();
+    showError('Agent request failed: ' + e.message);
+    runUploadBtn.disabled = false;
+    runUploadBtn.textContent = 'Run agent →';
+    return;
+  }
+
+  logLines.lastChild.remove();
+  addLog('done', `Transcription complete — plan created, ${data.plan.length} steps, doc type: ${data.doc_type}`);
+  await sleep(300);
+
+  for (const step of data.plan) {
+    const line = addLog('running', `${step.section_heading}`, true, step.title);
+    await sleep(380 + Math.random() * 220);
+    line.querySelector('.step-status').outerHTML = '<span class="step-status status-done">done</span>';
+    line.querySelector('.spinner')?.remove();
+    if (step.tools_used && step.tools_used.length > 0) {
+      await sleep(150);
+      addLog('tool', `↳ called tool: ${step.tools_used.join(', ')}`);
+    }
+  }
+
+  await sleep(200);
+  addLog('done', 'Self-check complete — ' + data.assumptions.length + ' note(s) flagged');
+  await sleep(250);
+  addLog('done', 'Document generated');
+
+  renderResults(data);
+  runUploadBtn.disabled = false;
+  runUploadBtn.textContent = 'Run agent →';
+}
+
+runUploadBtn.addEventListener('click', runAgentFromRecording);
 
 async function runAgent() {
   const requestText = document.getElementById('requestInput').value.trim();

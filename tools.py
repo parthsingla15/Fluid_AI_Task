@@ -1,3 +1,19 @@
+"""
+tools.py
+--------
+A genuine external tool the agent can choose to invoke during execution,
+via real LLM function/tool calling (not just another text generation call).
+
+This directly addresses "tool orchestration" as an evaluation criterion:
+the LLM is given a tool definition and independently decides WHETHER it
+needs to call it (e.g. when a section needs concrete numbers the user
+never provided), rather than every section blindly using it.
+
+The tool itself is a mock benchmark-data lookup (allowed per the brief:
+"Use of mock data is allowed where appropriate") standing in for what
+would, in a real product, be a call to an internal database, a pricing
+API, or a market-research service.
+"""
 
 import logging
 

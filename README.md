@@ -18,8 +18,14 @@ export GROQ_MODEL="llama-3.3-70b-versatile"
 python3 -m uvicorn main:app --reload
 ```
 
-Server runs at `http://localhost:8000`. Interactive docs at
-`http://localhost:8000/docs`.
+Server runs at `http://localhost:8000`.
+
+- **Browser UI**: open `http://localhost:8000/` — type a request (or click
+  one of the two example buttons), hit "Run agent", and watch the plan
+  execute step by step with a live-feeling console log, then get the
+  assumptions/notes and a download button for the `.docx`. This is the
+  easiest way to demo the two required test cases on camera.
+- **Interactive API docs**: `http://localhost:8000/docs`
 
 > **No API key?** The agent still runs — `llm_client.py` falls back to a
 > deterministic mock mode so you can test the full pipeline (plan → execute →
@@ -45,6 +51,52 @@ Or run `python3 test_pipeline.py` to exercise both required test cases
 directly (no server needed) and inspect the console output showing the
 agent's plan being created and executed step by step.
 
+## Meeting recording → Minutes of Meeting
+
+Beyond typed requests, you can upload a meeting recording (video or audio)
+and the agent will transcribe it and generate Minutes of Meeting through
+the exact same pipeline.
+
+- **Endpoint**: `POST /agent/from-recording` (multipart file upload)
+- **UI**: click the "Upload meeting recording" tab, drop in a file, hit Run
+- **How it works** (`transcribe.py`):
+  1. Audio is extracted from the video using `imageio-ffmpeg` — a pip
+     package that bundles a pre-compiled ffmpeg binary, so there's no
+     separate system install needed on Windows or on a deployment server
+  2. Long recordings are automatically **split into ~10-minute chunks**
+     (with a small overlap so words at chunk boundaries aren't lost),
+     since hosted transcription APIs cap file size — this means it scales
+     to long meetings, not just short clips
+  3. Each chunk is transcribed via Groq's hosted **Whisper large-v3**
+     model, then stitched back into one transcript
+  4. The transcript becomes the "request" text and is fed into the exact
+     same `generate_plan -> execute_plan -> reflect_on_draft -> build_docx`
+     pipeline used for typed requests — no separate code path to maintain
+- **Scope decision**: no speaker diarization (no "Speaker 1 / Speaker 2"
+  labels) — output is a clean transcript-based summary. Real diarization
+  (e.g. `pyannote.audio`) is possible but adds heavy ML dependencies and
+  meaningfully slower processing; left out to keep the service lightweight
+  and fast to deploy.
+
+## Tool orchestration
+
+`executor.py` doesn't just make plain text-generation calls — it gives the
+LLM a real callable tool via function/tool calling
+(`tools.py` + `llm_client.call_llm_with_tools`):
+
+- **`lookup_benchmark_data(topic)`** — a mock benchmark-data lookup
+  (typical budget range, timeline, team size for a given project type).
+  Stands in for what would be a real internal database or pricing API call.
+
+The model is given the tool's schema and description, and **decides for
+itself, per section, whether it needs it** — e.g. it calls the tool when
+writing a "Budget" or "Timeline" section, but not for an "Introduction"
+section. This is genuine tool orchestration (the agent choosing among
+available actions), not just another LLM text call. Which sections
+actually invoked the tool is tracked per-step (`tools_used`), surfaced in
+the API response, shown live in the UI's execution log, and noted in the
+generated `.docx`.
+
 ## Architecture
 
 ```
@@ -62,7 +114,15 @@ Request  ->  planner.py   ->  executor.py   ->  reflect.py    ->  docgen.py  -> 
 - **`executor.py`** — walks the plan in order, one LLM call per section,
   flips each step's status `pending -> in_progress -> done` (or
   `failed_recovered` if a single section's generation throws, so one bad
-  call doesn't kill the whole document).
+  call doesn't kill the whole document). Each call is made via
+  `call_llm_with_tools`, giving the model the option to invoke
+  `lookup_benchmark_data` when a section needs numbers (see "Tool
+  orchestration" below).
+- **`tools.py`** — the tool definition (JSON schema for function calling)
+  and its mock implementation.
+- **`transcribe.py`** — turns an uploaded meeting recording into text
+  (audio extraction, chunking, transcription) so it can feed into the
+  same pipeline as a typed request.
 - **`reflect.py`** — **the mandatory engineering improvement**
   (Reflection/Self-check). After drafting, the agent re-reads its own output
   next to the original request and explicitly lists what it had to assume

@@ -1,3 +1,13 @@
+"""
+executor.py
+-----------
+Walks the plan produced by planner.py and executes each step in order,
+generating the actual content for that section. Tracks status on each
+step ("pending" -> "in_progress" -> "done") so the agent's progress is
+observable (printed to console/logs as it works, and returned in the API
+response) - this is what makes the planning "autonomous" rather than
+just a list that's shown once and ignored.
+"""
 
 import logging
 from llm_client import call_llm_with_tools
