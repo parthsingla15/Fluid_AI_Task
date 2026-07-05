@@ -175,6 +175,7 @@
   .status-pending { color: var(--muted); }
   .status-running { color: var(--amber); }
   .status-done { color: var(--accent); }
+  .status-tool { color: #b39ddb; }
 
   .step-title { color: var(--text); font-size: 13.5px; }
   .step-title .heading { color: var(--muted); }
@@ -391,6 +392,10 @@ async function runAgent() {
     await sleep(380 + Math.random() * 220);
     line.querySelector('.step-status').outerHTML = '<span class="step-status status-done">done</span>';
     line.querySelector('.spinner')?.remove();
+    if (step.tools_used && step.tools_used.length > 0) {
+      await sleep(150);
+      addLog('tool', `↳ called tool: ${step.tools_used.join(', ')}`);
+    }
   }
 
   await sleep(200);
@@ -405,8 +410,10 @@ async function runAgent() {
 function addLog(status, text, running, subtitle) {
   const line = document.createElement('div');
   line.className = 'log-line';
-  const statusClass = status === 'done' ? 'status-done' : status === 'running' ? 'status-running' : 'status-pending';
-  const statusLabel = status === 'done' ? 'done' : status === 'running' ? 'running' : 'queued';
+  const statusMap = { done: 'status-done', running: 'status-running', tool: 'status-tool' };
+  const labelMap = { done: 'done', running: 'running', tool: 'tool' };
+  const statusClass = statusMap[status] || 'status-pending';
+  const statusLabel = labelMap[status] || 'queued';
   line.innerHTML = `
     <span class="step-status ${statusClass}">${statusLabel}</span>
     ${running ? '<span class="spinner"></span>' : ''}

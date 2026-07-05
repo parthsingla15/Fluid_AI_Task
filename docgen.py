@@ -56,6 +56,13 @@ def build_docx(plan: dict, assumptions: list[str], filename: str) -> str:
             else:
                 doc.add_paragraph(para_text)
 
+        if step.get("tools_used"):
+            note = doc.add_paragraph()
+            note_run = note.add_run(f"[Figures referenced via benchmark data lookup tool]")
+            note_run.italic = True
+            note_run.font.size = Pt(9)
+            note_run.font.color.rgb = RGBColor(0x8A, 0x8A, 0x8A)
+
     # Reflection / assumptions section
     doc.add_heading("Assumptions & Notes", level=1)
     intro = doc.add_paragraph()

@@ -1,16 +1,7 @@
-"""
-executor.py
------------
-Walks the plan produced by planner.py and executes each step in order,
-generating the actual content for that section. Tracks status on each
-step ("pending" -> "in_progress" -> "done") so the agent's progress is
-observable (printed to console/logs as it works, and returned in the API
-response) - this is what makes the planning "autonomous" rather than
-just a list that's shown once and ignored.
-"""
 
 import logging
-from llm_client import call_llm
+from llm_client import call_llm_with_tools
+from tools import TOOLS_SCHEMA, AVAILABLE_TOOLS
 
 logger = logging.getLogger("agent")
 
@@ -24,9 +15,16 @@ You will be given:
 Write clear, professional business content for ONLY this section
 (3-6 sentences, or a short bulleted list if more appropriate).
 Do not repeat the section heading in your answer. Do not add
-markdown formatting like ** or #. Where information wasn't given
-by the user, make a reasonable business assumption and state it
-briefly and naturally in the text.
+markdown formatting like ** or #.
+
+You have access to a lookup_benchmark_data tool that returns real-ish
+industry benchmark figures (budget range, timeline, team size). If this
+section needs concrete numbers that the user's request did not provide
+(for example a budget, timeline, or team size section), call the tool
+first and use its result. Do not call it for sections that don't need
+numeric data (e.g. an introduction or summary). Where information is
+still missing after that, make a reasonable business assumption and
+state it briefly and naturally in the text.
 """
 
 
@@ -51,8 +49,12 @@ def execute_plan(user_request: str, plan: dict) -> dict:
         )
 
         try:
-            content = call_llm(EXECUTOR_SYSTEM_PROMPT, user_prompt, temperature=0.5)
+            content, tools_used = call_llm_with_tools(
+                EXECUTOR_SYSTEM_PROMPT, user_prompt,
+                tools=TOOLS_SCHEMA, tool_functions=AVAILABLE_TOOLS, temperature=0.5,
+            )
             step["content"] = content.strip()
+            step["tools_used"] = tools_used
             step["status"] = "done"
         except Exception as e:
             logger.error(f"Step {step['id']} failed: {e}")
@@ -60,8 +62,10 @@ def execute_plan(user_request: str, plan: dict) -> dict:
                 f"[Content generation failed for this section: {e}. "
                 f"Placeholder inserted so document generation can still complete.]"
             )
+            step["tools_used"] = []
             step["status"] = "failed_recovered"
 
-        logger.info(f"[COMPLETE] Step {step['id']} -> status={step['status']}")
+        tool_note = f" (used tool: {step['tools_used']})" if step.get("tools_used") else ""
+        logger.info(f"[COMPLETE] Step {step['id']} -> status={step['status']}{tool_note}")
 
     return plan

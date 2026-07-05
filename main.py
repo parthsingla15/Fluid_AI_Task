@@ -20,10 +20,9 @@ import os
 import uuid
 import logging
 
-
 from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from planner import generate_plan
@@ -34,13 +33,18 @@ from docgen import build_docx, OUTPUT_DIR
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger("agent")
 
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
 app = FastAPI(
     title="Autonomous Document Agent",
     description="Plans, executes, self-checks, and produces a Word document from a natural-language request.",
     version="1.0.0",
 )
-STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
+# Serve the browser UI. Mounted at /ui so it doesn't shadow the JSON routes below;
+# "/" redirects to it for convenience.
 app.mount("/ui", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
+
 
 @app.get("/")
 def root():
@@ -104,7 +108,10 @@ def run_agent(payload: AgentRequest):
     return AgentResponse(
         doc_type=plan["doc_type"],
         title=plan["title"],
-        plan=[{k: v for k, v in s.items() if k != "content"} | {"content_preview": s.get("content", "")[:120]} for s in plan["steps"]],
+        plan=[{k: v for k, v in s.items() if k != "content"} | {
+            "content_preview": s.get("content", "")[:120],
+            "tools_used": s.get("tools_used", []),
+        } for s in plan["steps"]],
         assumptions=assumptions,
         summary=summary,
         download_url=f"/download/{filename}",
